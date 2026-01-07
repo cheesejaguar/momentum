@@ -1,9 +1,9 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import type { Task, CompletionLog } from './types';
+import type { Task, CompletionLog, Settings, StreakState } from './types';
 import { createSeedTasks } from './seedData';
 
 const DB_NAME = 'momentum-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Bumped for new stores
 
 interface MomentumDB {
   tasks: Task;
@@ -22,7 +22,7 @@ async function getDB(): Promise<IDBPDatabase<MomentumDB>> {
   }
 
   dbInstance = await openDB<MomentumDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
+    upgrade(db, oldVersion, _newVersion, _transaction) {
       // Tasks store
       if (!db.objectStoreNames.contains('tasks')) {
         db.createObjectStore('tasks', { keyPath: 'id' });
@@ -36,9 +36,15 @@ async function getDB(): Promise<IDBPDatabase<MomentumDB>> {
         completionsStore.createIndex('taskId_date', ['taskId', 'date']);
       }
 
-      // Meta store for app state (e.g., seeded flag)
+      // Meta store for app state (e.g., seeded flag, settings, streaks)
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' });
+      }
+
+      // Migration from v1 to v2: no schema changes needed, just use meta store for settings/streaks
+      if (oldVersion < 2) {
+        // Settings and streaks will be stored in meta store
+        // No additional stores needed
       }
     },
   });
@@ -55,11 +61,19 @@ export async function getAllTasks(includeArchived = false): Promise<Task[]> {
   const db = await getDB();
   const tasks = await db.getAll('tasks');
 
+  // Migration: ensure all tasks have new fields with defaults
+  const migratedTasks = tasks.map(task => ({
+    ...task,
+    focus: task.focus ?? false,
+    when: task.when ?? undefined,
+    trigger: task.trigger ?? undefined,
+  }));
+
   if (includeArchived) {
-    return tasks;
+    return migratedTasks;
   }
 
-  return tasks.filter(t => !t.archived);
+  return migratedTasks.filter(t => !t.archived);
 }
 
 /**
@@ -67,7 +81,17 @@ export async function getAllTasks(includeArchived = false): Promise<Task[]> {
  */
 export async function getTask(id: string): Promise<Task | undefined> {
   const db = await getDB();
-  return db.get('tasks', id);
+  const task = await db.get('tasks', id);
+  if (task) {
+    // Migration: ensure new fields
+    return {
+      ...task,
+      focus: task.focus ?? false,
+      when: task.when ?? undefined,
+      trigger: task.trigger ?? undefined,
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -134,6 +158,19 @@ export async function unarchiveTask(id: string): Promise<void> {
   }
 }
 
+/**
+ * Set focus status on a task
+ */
+export async function setTaskFocus(id: string, focus: boolean): Promise<void> {
+  const db = await getDB();
+  const task = await db.get('tasks', id);
+  if (task) {
+    task.focus = focus;
+    task.updatedAt = new Date().toISOString();
+    await db.put('tasks', task);
+  }
+}
+
 // ============ Completion Operations ============
 
 /**
@@ -181,6 +218,130 @@ export async function deleteCompletion(id: string): Promise<void> {
   await db.delete('completions', id);
 }
 
+// ============ Settings Operations ============
+
+const SETTINGS_KEY = 'settings';
+const DEFAULT_SETTINGS_VALUE: Settings = {
+  tone: 'gentle',
+  showLetterGrades: false,
+  showStreaks: true,
+  scoringMode: 'momentumScore',
+  scoringEmphasis: 'allTasksEqual',
+  enableReminders: false,
+  showFreshStartBanner: true,
+};
+
+/**
+ * Get user settings
+ */
+export async function getSettings(): Promise<Settings> {
+  const db = await getDB();
+  const meta = await db.get('meta', SETTINGS_KEY);
+  if (meta?.value) {
+    try {
+      const parsed = JSON.parse(meta.value);
+      // Merge with defaults to handle new fields
+      return { ...DEFAULT_SETTINGS_VALUE, ...parsed };
+    } catch {
+      return DEFAULT_SETTINGS_VALUE;
+    }
+  }
+  return DEFAULT_SETTINGS_VALUE;
+}
+
+/**
+ * Save user settings
+ */
+export async function saveSettings(settings: Settings): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: SETTINGS_KEY, value: JSON.stringify(settings) });
+}
+
+// ============ Streak Operations ============
+
+const STREAKS_KEY = 'streaks';
+const DEFAULT_STREAKS_VALUE: StreakState = {
+  consistencyStreak: 0,
+  lastConsistencyDate: null,
+  perfectStreak: 0,
+  lastPerfectDate: null,
+  graceDaysUsedThisWeek: 0,
+  graceDayWeekStart: '',
+  bestConsistencyStreak: 0,
+  bestPerfectStreak: 0,
+};
+
+/**
+ * Get streak state
+ */
+export async function getStreaks(): Promise<StreakState> {
+  const db = await getDB();
+  const meta = await db.get('meta', STREAKS_KEY);
+  if (meta?.value) {
+    try {
+      const parsed = JSON.parse(meta.value);
+      return { ...DEFAULT_STREAKS_VALUE, ...parsed };
+    } catch {
+      return DEFAULT_STREAKS_VALUE;
+    }
+  }
+  return DEFAULT_STREAKS_VALUE;
+}
+
+/**
+ * Save streak state
+ */
+export async function saveStreaks(streaks: StreakState): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: STREAKS_KEY, value: JSON.stringify(streaks) });
+}
+
+// ============ Fresh Start Operations ============
+
+const LAST_OPEN_KEY = 'lastOpenDate';
+const FOCUS_TASKS_KEY = 'focusTasks';
+
+/**
+ * Get last open date
+ */
+export async function getLastOpenDate(): Promise<string | null> {
+  const db = await getDB();
+  const meta = await db.get('meta', LAST_OPEN_KEY);
+  return meta?.value ?? null;
+}
+
+/**
+ * Save last open date
+ */
+export async function saveLastOpenDate(date: string): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: LAST_OPEN_KEY, value: date });
+}
+
+/**
+ * Get focus task IDs for today
+ */
+export async function getFocusTasks(): Promise<string[]> {
+  const db = await getDB();
+  const meta = await db.get('meta', FOCUS_TASKS_KEY);
+  if (meta?.value) {
+    try {
+      return JSON.parse(meta.value);
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Save focus task IDs
+ */
+export async function saveFocusTasks(taskIds: string[]): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: FOCUS_TASKS_KEY, value: JSON.stringify(taskIds) });
+}
+
 // ============ Initialization ============
 
 /**
@@ -205,6 +366,14 @@ export async function initializeAppData(): Promise<void> {
     // Mark as seeded
     await db.put('meta', { key: 'seeded', value: 'true' });
   }
+
+  // Ensure settings exist
+  const settings = await getSettings();
+  await saveSettings(settings);
+
+  // Ensure streaks exist
+  const streaks = await getStreaks();
+  await saveStreaks(streaks);
 }
 
 /**
@@ -223,11 +392,18 @@ export async function clearAllData(): Promise<void> {
 /**
  * Export all data for backup
  */
-export async function exportData(): Promise<{ tasks: Task[]; completions: CompletionLog[] }> {
+export async function exportData(): Promise<{
+  tasks: Task[];
+  completions: CompletionLog[];
+  settings: Settings;
+  streaks: StreakState;
+}> {
   const db = await getDB();
   const tasks = await db.getAll('tasks');
   const completions = await db.getAll('completions');
-  return { tasks, completions };
+  const settings = await getSettings();
+  const streaks = await getStreaks();
+  return { tasks, completions, settings, streaks };
 }
 
 /**
@@ -236,6 +412,8 @@ export async function exportData(): Promise<{ tasks: Task[]; completions: Comple
 export async function importData(data: {
   tasks: Task[];
   completions: CompletionLog[];
+  settings?: Settings;
+  streaks?: StreakState;
 }): Promise<void> {
   const db = await getDB();
 
@@ -250,4 +428,11 @@ export async function importData(data: {
   }
 
   await tx.done;
+
+  if (data.settings) {
+    await saveSettings(data.settings);
+  }
+  if (data.streaks) {
+    await saveStreaks(data.streaks);
+  }
 }

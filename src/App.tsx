@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { FullPageLoader } from './components/LoadingSpinner';
 import { TodayScreen } from './screens/TodayScreen';
 import { PlanScreen } from './screens/PlanScreen';
+import { SettingsScreen } from './screens/SettingsScreen';
 
 // Lazy load ProgressScreen since it includes heavy Recharts library
 const ProgressScreen = lazy(() =>
@@ -27,6 +28,7 @@ export default function App() {
                 </Suspense>
               }
             />
+            <Route path="settings" element={<SettingsScreen />} />
           </Route>
         </Routes>
       </BrowserRouter>

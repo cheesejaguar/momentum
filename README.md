@@ -1,14 +1,31 @@
 # Momentum
 
-A mobile-first web app for building momentum through daily habits and weekly chores. Track your progress, earn grades, and maintain streaks.
+A mobile-first web app for building momentum through daily habits and weekly chores. Built with evidence-based motivation design principles from Self-Determination Theory.
 
 ## Features
 
+### Core Functionality
 - **Daily Habits**: Track recurring daily tasks like brushing teeth, showering, and washing face
 - **Weekly Chores**: 15-minute bite-sized tasks spread across the week
 - **Custom Tasks**: Add your own tasks with flexible scheduling options
-- **Progress Tracking**: Visualize your completion rates with charts and grades
-- **Streaks**: Build momentum with consecutive days of success
+- **Implementation Intentions**: Link habits to triggers (e.g., "After I brush my teeth...")
+- **Time of Day**: Schedule tasks for morning, afternoon, or evening
+
+### Motivation Design
+- **Momentum Score**: A supportive 0-100 score instead of judgmental letter grades
+- **Focus Tasks**: Mark up to 3 tasks as priorities for consistency tracking
+- **Dual Streak System**:
+  - Consistency Streak: Did you show up today? (focus task or any task)
+  - Perfect Day Streak: 100% completion days
+- **Grace Days**: One per week to repair a streak without breaking it
+- **Fresh Start**: Encouraging banners for new days and weeks
+- **Microcopy System**: Autonomy-supportive language in 3 tones (Gentle, Coach, Minimal)
+- **"What's Next" Suggestions**: Smart recommendations for the easiest remaining task
+
+### Data & Display
+- **Progress Tracking**: Visualize completion rates with charts and trends
+- **Trend vs Last Week**: See how you're improving over time
+- **Customizable Display**: Toggle letter grades, streaks, and fresh start banners
 - **Offline-First**: All data stored locally using IndexedDB
 - **Dark Mode**: Automatic dark mode support based on system preference
 - **PWA-Ready**: Includes manifest for "Add to Home Screen" functionality
@@ -51,26 +68,35 @@ npm run test:coverage # Run tests with coverage report
 ```
 src/
 ├── components/       # Reusable UI components
-│   ├── BottomNav.tsx    # Tab navigation
-│   ├── EmptyState.tsx   # Empty state placeholder
-│   ├── GradeDisplay.tsx # Grade badge component
-│   ├── Layout.tsx       # Main layout wrapper
+│   ├── BottomNav.tsx      # Tab navigation
+│   ├── EmptyState.tsx     # Empty state placeholder
+│   ├── FocusSection.tsx   # Focus tasks section
+│   ├── FreshStartBanner.tsx # New day/week banners
+│   ├── GradeDisplay.tsx   # Grade badge component
+│   ├── Layout.tsx         # Main layout wrapper
 │   ├── LoadingSpinner.tsx
-│   ├── Modal.tsx        # Modal dialog
-│   ├── TaskForm.tsx     # Add/edit task form
-│   └── TaskRow.tsx      # Individual task display
+│   ├── Modal.tsx          # Modal dialog
+│   ├── NextAction.tsx     # "What's next" suggestion
+│   ├── ProgressCard.tsx   # Momentum score display
+│   ├── TaskForm.tsx       # Add/edit task form
+│   └── TaskRow.tsx        # Individual task display
+├── copy/             # Microcopy system
+│   └── microcopy.ts     # Tone-based messages
 ├── data/             # Data layer
 │   ├── context.tsx      # React context for app state
 │   ├── repository.ts    # IndexedDB operations
 │   ├── seedData.ts      # Default tasks for new users
 │   └── types.ts         # TypeScript type definitions
+├── hooks/            # Custom hooks
+│   └── useSettings.ts   # Settings management
 ├── screens/          # Main screens/pages
-│   ├── TodayScreen.tsx  # Daily task view
-│   ├── PlanScreen.tsx   # Task management (CRUD)
-│   └── ProgressScreen.tsx # Stats and charts
+│   ├── TodayScreen.tsx    # Daily task view
+│   ├── PlanScreen.tsx     # Task management (CRUD)
+│   ├── ProgressScreen.tsx # Stats and charts
+│   └── SettingsScreen.tsx # User preferences
 ├── utils/            # Utility functions
 │   ├── date.ts          # Date manipulation helpers
-│   ├── grading.ts       # Grade calculation
+│   ├── grading.ts       # Score/streak calculation
 │   └── scheduling.ts    # Task scheduling logic
 └── test/             # Test setup
     └── setup.ts
@@ -82,37 +108,62 @@ src/
 
 ```typescript
 interface Task {
-  id: string;           // UUID
-  name: string;         // Display name
+  id: string;
+  name: string;
   kind: 'habit' | 'chore' | 'custom';
   schedule: {
     type: 'daily' | 'weekdays' | 'times_per_week' | 'every_n_days';
-    weekdays?: number[];      // 0=Sun, 1=Mon, ..., 6=Sat
-    timesPerWeek?: number;    // For "X times per week"
-    everyNDays?: number;      // For "every N days"
+    weekdays?: number[];
+    timesPerWeek?: number;
+    everyNDays?: number;
   };
-  targetPerDay: number;  // How many times per day (e.g., 2 for brushing teeth)
+  targetPerDay: number;
   notes?: string;
-  createdAt: string;     // ISO timestamp
+  focus?: boolean;              // Priority task for consistency
+  when?: 'morning' | 'afternoon' | 'evening' | 'anytime';
+  trigger?: string;             // Implementation intention
+  createdAt: string;
   updatedAt: string;
   archived: boolean;
 }
 ```
 
-### Completion Log
+### Settings
 
 ```typescript
-interface CompletionLog {
-  id: string;
-  taskId: string;
-  date: string;          // YYYY-MM-DD
-  countCompleted: number;
-  timestamps: string[];  // When each tap occurred
+interface Settings {
+  tone: 'gentle' | 'coach' | 'minimal';
+  showLetterGrades: boolean;
+  showStreaks: boolean;
+  scoringMode: 'momentumScore' | 'letterGradeOnly' | 'both';
+  scoringEmphasis: 'consistencyFirst' | 'allTasksEqual';
+  enableReminders: boolean;
+  showFreshStartBanner: boolean;
 }
 ```
 
-### Grading System
+### Streak State
 
+```typescript
+interface StreakState {
+  consistencyStreak: number;      // Days showing up
+  lastConsistencyDate: string | null;
+  perfectStreak: number;          // 100% days
+  lastPerfectDate: string | null;
+  graceDaysUsedThisWeek: number;  // 1 allowed per week
+  graceDayWeekStart: string;
+  bestConsistencyStreak: number;  // Personal best
+  bestPerfectStreak: number;
+}
+```
+
+### Scoring System
+
+**Momentum Score (Primary)**
+- 0-100 based on task completion percentage
+- Supportive framing: "You're 75% done" not "You got a C"
+
+**Letter Grades (Optional)**
 | Grade | Percentage |
 |-------|------------|
 | A     | >= 90%     |
@@ -120,6 +171,20 @@ interface CompletionLog {
 | C     | 70-79%     |
 | D     | 60-69%     |
 | F     | < 60%      |
+
+## Microcopy Tones
+
+**Gentle** (default): Warm, supportive messages
+- "Every journey starts with a single step. You've got this."
+- "You're so close! Just a little more."
+
+**Coach**: Direct, action-focused
+- "Let's build some momentum today."
+- "Almost there. Finish strong."
+
+**Minimal**: Brief, no-frills
+- "Ready when you are."
+- "Nearly done."
 
 ## Tech Stack
 
@@ -148,6 +213,20 @@ The app comes pre-seeded with:
 - Friday: Laundry fold + put away
 - Saturday: Floors quick sweep
 - Sunday: Trash + reset week
+
+## Design Philosophy
+
+Momentum is built on principles from Self-Determination Theory:
+
+1. **Autonomy**: Users choose their focus tasks and tone preferences
+2. **Competence**: Progress bars, "You're close" messaging, and small wins
+3. **Relatedness**: Supportive, warm language that feels like a friend
+
+Key design decisions:
+- No shame: Momentum Score replaces letter grades by default
+- Fresh starts: Every day and week is a new opportunity
+- Grace days: One "free pass" per week protects streaks
+- Implementation intentions: Linking habits to triggers increases follow-through
 
 ## Future Improvements
 

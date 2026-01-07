@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { Task, TaskKind, ScheduleType, TaskSchedule } from '../data/types';
+import type { Task, TaskKind, ScheduleType, TaskSchedule, TaskWhen } from '../data/types';
 import { getWeekdayShort } from '../utils/date';
 
 interface TaskFormProps {
@@ -19,6 +19,10 @@ export function TaskForm({ task, onSave, onCancel }: TaskFormProps) {
   const [everyNDays, setEveryNDays] = useState(task?.schedule.everyNDays ?? 2);
   const [targetPerDay, setTargetPerDay] = useState(task?.targetPerDay ?? 1);
   const [notes, setNotes] = useState(task?.notes ?? '');
+  const [focus, setFocus] = useState(task?.focus ?? false);
+  const [when, setWhen] = useState<TaskWhen | undefined>(task?.when);
+  const [trigger, setTrigger] = useState(task?.trigger ?? '');
+  const [showAdvanced, setShowAdvanced] = useState(!!task?.when || !!task?.trigger || !!task?.focus);
 
   const isEditing = !!task;
 
@@ -50,6 +54,9 @@ export function TaskForm({ task, onSave, onCancel }: TaskFormProps) {
       schedule,
       targetPerDay,
       notes: notes.trim() || undefined,
+      focus,
+      when,
+      trigger: trigger.trim() || undefined,
     });
   };
 
@@ -238,6 +245,92 @@ export function TaskForm({ task, onSave, onCancel }: TaskFormProps) {
           rows={2}
           className="w-full px-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
         />
+      </div>
+
+      {/* Advanced Options */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+        >
+          <svg
+            className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          Advanced options
+        </button>
+
+        {showAdvanced && (
+          <div className="mt-4 space-y-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            {/* Focus Task */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium text-slate-700 dark:text-slate-200">Focus Task</div>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Prioritize this task for consistency tracking
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFocus(!focus)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                  focus ? 'bg-amber-500' : 'bg-slate-200 dark:bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    focus ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* When (Time of Day) */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                When (time of day)
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {([undefined, 'morning', 'afternoon', 'evening'] as const).map(w => (
+                  <button
+                    key={w ?? 'anytime'}
+                    type="button"
+                    onClick={() => setWhen(w)}
+                    className={`py-2 px-3 rounded-lg text-xs font-medium transition-colors ${
+                      when === w
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {w ? w.charAt(0).toUpperCase() + w.slice(1) : 'Anytime'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Trigger (Implementation Intention) */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                Trigger (implementation intention)
+              </label>
+              <input
+                type="text"
+                value={trigger}
+                onChange={e => setTrigger(e.target.value)}
+                placeholder="e.g., After I brush my teeth..."
+                className="w-full px-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              />
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Link this habit to an existing routine for better follow-through
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Actions */}

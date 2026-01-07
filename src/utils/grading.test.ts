@@ -7,12 +7,16 @@ import {
   getGradeMessage,
   isPassingGrade,
   calculateDayCompletionPercent,
+  calculateMomentumScore,
   getDayStats,
   getLastNDaysStats,
   getWeekStats,
   getLastNWeeksStats,
   calculateCurrentStreak,
   calculateLongestStreak,
+  calculateConsistencyStreak,
+  calculatePerfectStreak,
+  getNextBestAction,
 } from './grading';
 
 // Helper to create test data
@@ -291,5 +295,253 @@ describe('calculateLongestStreak', () => {
     ];
     const result = calculateLongestStreak(tasks, completions);
     expect(result).toBe(3);
+  });
+});
+
+describe('calculateMomentumScore', () => {
+  it('returns 100 when no tasks scheduled', () => {
+    const tasks = [
+      createTask({ schedule: { type: 'weekdays', weekdays: [1] } }), // Monday only
+    ];
+    const result = calculateMomentumScore(tasks, [], '2025-01-15'); // Wednesday
+    expect(result).toBe(100);
+  });
+
+  it('returns 0 when no completions', () => {
+    const tasks = [createTask({ id: '1' })];
+    const result = calculateMomentumScore(tasks, [], '2025-01-15');
+    expect(result).toBe(0);
+  });
+
+  it('returns 100 when all tasks complete', () => {
+    const tasks = [createTask({ id: '1' })];
+    const completions = [createCompletion({ taskId: '1', date: '2025-01-15' })];
+    const result = calculateMomentumScore(tasks, completions, '2025-01-15');
+    expect(result).toBe(100);
+  });
+
+  it('calculates partial completion correctly', () => {
+    const tasks = [
+      createTask({ id: '1', targetPerDay: 2 }),
+      createTask({ id: '2', targetPerDay: 2 }),
+    ];
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15', countCompleted: 2 }),
+      createCompletion({ taskId: '2', date: '2025-01-15', countCompleted: 1 }),
+    ];
+    const result = calculateMomentumScore(tasks, completions, '2025-01-15');
+    expect(result).toBe(75); // 3/4 = 75%
+  });
+});
+
+describe('calculateConsistencyStreak', () => {
+  it('returns 0 when no completions', () => {
+    const tasks = [createTask({ id: '1' })];
+    const result = calculateConsistencyStreak(tasks, []);
+    expect(result).toBe(0);
+  });
+
+  it('counts consecutive days with any completion', () => {
+    const tasks = [createTask({ id: '1' })];
+    const today = new Date(2025, 0, 15);
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15' }),
+      createCompletion({ taskId: '1', date: '2025-01-14' }),
+      createCompletion({ taskId: '1', date: '2025-01-13' }),
+    ];
+    const result = calculateConsistencyStreak(tasks, completions, today);
+    expect(result).toBe(3);
+  });
+
+  it('counts focus task completions for consistency', () => {
+    const tasks = [
+      createTask({ id: '1', focus: true }),
+      createTask({ id: '2', focus: false }),
+    ];
+    const today = new Date(2025, 0, 15);
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15' }), // Focus task done
+      createCompletion({ taskId: '1', date: '2025-01-14' }), // Focus task done
+    ];
+    const result = calculateConsistencyStreak(tasks, completions, today);
+    expect(result).toBe(2);
+  });
+});
+
+describe('calculatePerfectStreak', () => {
+  it('returns 0 when no completions', () => {
+    const tasks = [createTask({ id: '1' })];
+    const result = calculatePerfectStreak(tasks, []);
+    expect(result).toBe(0);
+  });
+
+  it('counts consecutive 100% days', () => {
+    const tasks = [createTask({ id: '1' })];
+    const today = new Date(2025, 0, 15);
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15' }),
+      createCompletion({ taskId: '1', date: '2025-01-14' }),
+      createCompletion({ taskId: '1', date: '2025-01-13' }),
+    ];
+    const result = calculatePerfectStreak(tasks, completions, today);
+    expect(result).toBe(3);
+  });
+
+  it('breaks on non-perfect day', () => {
+    const tasks = [
+      createTask({ id: '1' }),
+      createTask({ id: '2' }),
+    ];
+    const today = new Date(2025, 0, 15);
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15' }),
+      createCompletion({ taskId: '2', date: '2025-01-15' }),
+      createCompletion({ taskId: '1', date: '2025-01-14' }), // Only 1 of 2 done
+    ];
+    const result = calculatePerfectStreak(tasks, completions, today);
+    expect(result).toBe(1); // Only today is perfect
+  });
+});
+
+describe('getNextBestAction', () => {
+  it('returns null when all tasks complete', () => {
+    const tasks = [createTask({ id: '1' })];
+    const completions = [createCompletion({ taskId: '1', date: '2025-01-15' })];
+    const result = getNextBestAction(tasks, completions, '2025-01-15');
+    expect(result).toBeNull();
+  });
+
+  it('returns incomplete task', () => {
+    const tasks = [
+      createTask({ id: '1' }),
+      createTask({ id: '2', name: 'Second Task' }),
+    ];
+    const completions = [createCompletion({ taskId: '1', date: '2025-01-15' })];
+    const result = getNextBestAction(tasks, completions, '2025-01-15');
+    expect(result?.id).toBe('2');
+  });
+
+  it('prioritizes focus tasks', () => {
+    const tasks = [
+      createTask({ id: '1', focus: false }),
+      createTask({ id: '2', focus: true, name: 'Focus Task' }),
+    ];
+    const result = getNextBestAction(tasks, [], '2025-01-15');
+    expect(result?.id).toBe('2');
+  });
+
+  it('prioritizes tasks with fewer remaining', () => {
+    const tasks = [
+      createTask({ id: '1', targetPerDay: 5 }),
+      createTask({ id: '2', targetPerDay: 2 }),
+    ];
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15', countCompleted: 2 }), // 3 remaining
+      createCompletion({ taskId: '2', date: '2025-01-15', countCompleted: 1 }), // 1 remaining
+    ];
+    const result = getNextBestAction(tasks, completions, '2025-01-15');
+    expect(result?.id).toBe('2'); // Fewer remaining
+  });
+});
+
+describe('getDayStats extended fields', () => {
+  it('tracks focus tasks correctly', () => {
+    const tasks = [
+      createTask({ id: '1', focus: true }),
+      createTask({ id: '2', focus: true }),
+      createTask({ id: '3', focus: false }),
+    ];
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15' }),
+    ];
+    const result = getDayStats(tasks, completions, '2025-01-15');
+
+    expect(result.focusTasksTotal).toBe(2);
+    expect(result.focusTasksCompleted).toBe(1);
+  });
+
+  it('tracks wins correctly', () => {
+    const tasks = [
+      createTask({ id: '1', name: 'Task One' }),
+      createTask({ id: '2', name: 'Task Two' }),
+    ];
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15' }),
+    ];
+    const result = getDayStats(tasks, completions, '2025-01-15');
+
+    expect(result.wins).toContain('Task One');
+    expect(result.wins).not.toContain('Task Two');
+  });
+
+  it('tracks total target and completed counts', () => {
+    const tasks = [
+      createTask({ id: '1', targetPerDay: 3 }),
+      createTask({ id: '2', targetPerDay: 2 }),
+    ];
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15', countCompleted: 2 }),
+      createCompletion({ taskId: '2', date: '2025-01-15', countCompleted: 2 }),
+    ];
+    const result = getDayStats(tasks, completions, '2025-01-15');
+
+    expect(result.totalTarget).toBe(5);
+    expect(result.totalCompleted).toBe(4); // 2 + 2, not exceeding targets
+  });
+});
+
+describe('getWeekStats extended fields', () => {
+  it('calculates trend vs last week', () => {
+    const tasks = [createTask({ id: '1' })];
+    const completions = [
+      // This week (week of Jan 12)
+      createCompletion({ taskId: '1', date: '2025-01-12' }),
+      createCompletion({ taskId: '1', date: '2025-01-13' }),
+      createCompletion({ taskId: '1', date: '2025-01-14' }),
+      createCompletion({ taskId: '1', date: '2025-01-15' }),
+      createCompletion({ taskId: '1', date: '2025-01-16' }),
+      createCompletion({ taskId: '1', date: '2025-01-17' }),
+      createCompletion({ taskId: '1', date: '2025-01-18' }),
+    ];
+
+    // Previous week stats (simulated)
+    const previousWeekStats = {
+      weekStartDate: '2025-01-05',
+      totalTasks: 7,
+      completedTasks: 4,
+      percentage: 57,
+      grade: 'F' as const,
+      dailyStats: [],
+      trendVsLastWeek: 0,
+      consistencyDays: 4,
+      perfectDays: 4,
+    };
+
+    const result = getWeekStats(tasks, completions, '2025-01-12', previousWeekStats);
+
+    expect(result.trendVsLastWeek).toBe(43); // 100 - 57
+  });
+
+  it('counts consistency days', () => {
+    const tasks = [createTask({ id: '1' })];
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-12' }),
+      createCompletion({ taskId: '1', date: '2025-01-14' }),
+      createCompletion({ taskId: '1', date: '2025-01-16' }),
+    ];
+    const result = getWeekStats(tasks, completions, '2025-01-12');
+
+    expect(result.consistencyDays).toBe(3); // 3 days with at least one completion
+  });
+
+  it('counts perfect days', () => {
+    const tasks = [createTask({ id: '1' })];
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-12' }),
+      createCompletion({ taskId: '1', date: '2025-01-13' }),
+    ];
+    const result = getWeekStats(tasks, completions, '2025-01-12');
+
+    expect(result.perfectDays).toBe(2); // 2 days with 100%
   });
 });

@@ -1,19 +1,29 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../data/context';
-import { FullPageLoader, EmptyState } from '../components';
+import { FullPageLoader, EmptyState, ProgressCard, FocusSection, NextAction, FreshStartBanner } from '../components';
 import { TaskRow } from '../components/TaskRow';
-import { GradeDisplay } from '../components/GradeDisplay';
-import { getScheduledTasksForDate, groupTasksByKind } from '../utils/scheduling';
-import { getDayStats } from '../utils/grading';
+import { getScheduledTasksForDate, groupTasksByKind, isTaskCompleteForDate } from '../utils/scheduling';
+import { getDayStats, getNextBestAction } from '../utils/grading';
 import { getLocalDateString, formatDateForDisplay } from '../utils/date';
+import { useSettings } from '../hooks/useSettings';
 
 export function TodayScreen() {
-  const { tasks, completions, isLoading } = useApp();
+  const { tasks, completions, isLoading, incrementCompletion } = useApp();
+  const { settings, isLoading: settingsLoading } = useSettings();
 
   const today = getLocalDateString();
 
-  const { scheduledTasks, groupedTasks, todayStats, todaysCompletions } = useMemo(() => {
+  const {
+    scheduledTasks,
+    groupedTasks,
+    todayStats,
+    todaysCompletions,
+    focusTasks,
+    allFocusComplete,
+    nextAction,
+    nonFocusHabits,
+  } = useMemo(() => {
     const scheduled = getScheduledTasksForDate(tasks, today);
     const grouped = groupTasksByKind(scheduled);
     const stats = getDayStats(tasks, completions, today);
@@ -21,60 +31,76 @@ export function TodayScreen() {
       completions.filter(c => c.date === today).map(c => [c.taskId, c])
     );
 
+    // Get focus tasks (up to 3)
+    const focus = scheduled.filter(t => t.focus).slice(0, 3);
+
+    // Check if all focus tasks are complete
+    const allFocusDone = focus.length > 0 && focus.every(t => {
+      const completion = completionsMap.get(t.id);
+      return isTaskCompleteForDate(t, completion, today);
+    });
+
+    // Get next best action
+    const next = getNextBestAction(tasks, completions, today);
+
+    // Separate focus habits from non-focus habits
+    const focusIds = new Set(focus.map(t => t.id));
+    const nonFocus = grouped.habits.filter(t => !focusIds.has(t.id));
+
     return {
       scheduledTasks: scheduled,
       groupedTasks: grouped,
       todayStats: stats,
       todaysCompletions: completionsMap,
+      focusTasks: focus,
+      allFocusComplete: allFocusDone,
+      nextAction: next,
+      nonFocusHabits: nonFocus,
     };
   }, [tasks, completions, today]);
 
-  if (isLoading) {
+  if (isLoading || settingsLoading) {
     return <FullPageLoader />;
   }
 
   const hasTasks = scheduledTasks.length > 0;
   const todaysChore = groupedTasks.chores.length > 0 ? groupedTasks.chores[0] : null;
 
+  // Handle quick complete from NextAction
+  const handleQuickComplete = () => {
+    if (nextAction) {
+      incrementCompletion(nextAction.id, today);
+    }
+  };
+
   return (
     <div className="max-w-lg mx-auto">
       {/* Header */}
       <header className="px-5 pt-6 pb-4 safe-top">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Today</h1>
             <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
               {formatDateForDisplay(today)}
             </p>
           </div>
-          {hasTasks && (
-            <GradeDisplay
-              grade={todayStats.grade}
-              percentage={todayStats.percentage}
-              size="sm"
-            />
-          )}
         </div>
 
-        {/* Encouraging message */}
-        {hasTasks && todayStats.percentage < 100 && (
-          <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
-            <p className="text-sm text-blue-700 dark:text-blue-300">
-              {todayStats.completedTasks === 0
-                ? "Start your day with small wins. You've got this!"
-                : todayStats.percentage >= 50
-                  ? "Great momentum! Keep it going."
-                  : "Making progress. Every check mark counts."}
-            </p>
-          </div>
-        )}
+        {/* Fresh Start Banner */}
+        <FreshStartBanner
+          tone={settings.tone}
+          showBanner={settings.showFreshStartBanner}
+        />
 
-        {hasTasks && todayStats.percentage === 100 && (
-          <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-100 dark:border-emerald-800">
-            <p className="text-sm text-emerald-700 dark:text-emerald-300">
-              All done! You're building great momentum.
-            </p>
-          </div>
+        {/* Progress Card */}
+        {hasTasks && (
+          <ProgressCard
+            momentumScore={todayStats.percentage}
+            percentage={todayStats.percentage}
+            tone={settings.tone}
+            showLetterGrade={settings.showLetterGrades}
+            grade={todayStats.grade}
+          />
         )}
       </header>
 
@@ -113,14 +139,34 @@ export function TodayScreen() {
           />
         ) : (
           <div className="space-y-6">
-            {/* Daily Habits */}
-            {groupedTasks.habits.length > 0 && (
+            {/* Next Action Suggestion */}
+            {nextAction && todayStats.percentage < 100 && (
+              <NextAction
+                task={nextAction}
+                tone={settings.tone}
+                onComplete={handleQuickComplete}
+              />
+            )}
+
+            {/* Focus Tasks Section */}
+            {focusTasks.length > 0 && (
+              <FocusSection
+                focusTasks={focusTasks}
+                completions={todaysCompletions}
+                date={today}
+                tone={settings.tone}
+                allFocusComplete={allFocusComplete}
+              />
+            )}
+
+            {/* Daily Habits (non-focus) */}
+            {nonFocusHabits.length > 0 && (
               <section className="animate-fadeIn">
                 <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">
                   Daily Habits
                 </h2>
                 <div className="space-y-3">
-                  {groupedTasks.habits.map(task => (
+                  {nonFocusHabits.map(task => (
                     <TaskRow
                       key={task.id}
                       task={task}
