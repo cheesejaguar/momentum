@@ -54,6 +54,24 @@ export function getGradeMessage(grade: Grade): string {
 }
 
 /**
+ * Check if a grade counts as "passing" for streaks (C or better)
+ */
+export function isPassingGrade(grade: Grade): boolean {
+  return grade === 'A' || grade === 'B' || grade === 'C';
+}
+
+/**
+ * Build a lookup map for completions by taskId+date for O(1) access
+ */
+function buildCompletionMap(completions: CompletionLog[]): Map<string, CompletionLog> {
+  const map = new Map<string, CompletionLog>();
+  for (const c of completions) {
+    map.set(`${c.taskId}:${c.date}`, c);
+  }
+  return map;
+}
+
+/**
  * Calculate completion percentage for a single day
  */
 export function calculateDayCompletionPercent(
@@ -67,12 +85,15 @@ export function calculateDayCompletionPercent(
     return 100; // No tasks scheduled = perfect day
   }
 
+  // Build map for O(1) lookup
+  const completionMap = buildCompletionMap(completions);
+
   let totalTarget = 0;
   let totalCompleted = 0;
 
   for (const task of scheduledTasks) {
     totalTarget += task.targetPerDay;
-    const completion = completions.find(c => c.taskId === task.id && c.date === dateString);
+    const completion = completionMap.get(`${task.id}:${dateString}`);
     totalCompleted += Math.min(completion?.countCompleted ?? 0, task.targetPerDay);
   }
 
@@ -93,15 +114,25 @@ export function getDayStats(
 ): DayStats {
   const scheduledTasks = getScheduledTasksForDate(tasks, dateString);
 
+  // Build map for O(1) lookup
+  const completionMap = buildCompletionMap(completions);
+
   let completedCount = 0;
+  let totalTarget = 0;
+  let totalCompleted = 0;
+
   for (const task of scheduledTasks) {
-    const completion = completions.find(c => c.taskId === task.id && c.date === dateString);
+    totalTarget += task.targetPerDay;
+    const completion = completionMap.get(`${task.id}:${dateString}`);
+    totalCompleted += Math.min(completion?.countCompleted ?? 0, task.targetPerDay);
     if (isTaskCompleteForDate(task, completion, dateString)) {
       completedCount++;
     }
   }
 
-  const percentage = calculateDayCompletionPercent(tasks, completions, dateString);
+  const percentage = totalTarget > 0
+    ? Math.round((totalCompleted / totalTarget) * 100)
+    : 100;
 
   return {
     date: dateString,
@@ -191,7 +222,7 @@ export function calculateCurrentStreak(
     }
 
     // Streak continues if grade is C or better
-    if (stats.grade === 'A' || stats.grade === 'B' || stats.grade === 'C') {
+    if (isPassingGrade(stats.grade)) {
       streak++;
     } else {
       break;
@@ -233,7 +264,7 @@ export function calculateLongestStreak(
     // Check if this date is consecutive with the previous one
     const isConsecutive = prevDate === null || isNextDay(prevDate, dateString);
 
-    if (stats.grade === 'A' || stats.grade === 'B' || stats.grade === 'C') {
+    if (isPassingGrade(stats.grade)) {
       if (isConsecutive) {
         currentStreak++;
       } else {

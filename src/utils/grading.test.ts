@@ -5,6 +5,7 @@ import {
   getGradeColor,
   getGradeBgColor,
   getGradeMessage,
+  isPassingGrade,
   calculateDayCompletionPercent,
   getDayStats,
   getLastNDaysStats,
@@ -99,6 +100,19 @@ describe('getGradeMessage', () => {
     expect(getGradeMessage('C')).toContain('progress');
     expect(getGradeMessage('D')).toContain('showed up');
     expect(getGradeMessage('F')).toContain('fresh start');
+  });
+});
+
+describe('isPassingGrade', () => {
+  it('returns true for A, B, and C grades', () => {
+    expect(isPassingGrade('A')).toBe(true);
+    expect(isPassingGrade('B')).toBe(true);
+    expect(isPassingGrade('C')).toBe(true);
+  });
+
+  it('returns false for D and F grades', () => {
+    expect(isPassingGrade('D')).toBe(false);
+    expect(isPassingGrade('F')).toBe(false);
   });
 });
 
