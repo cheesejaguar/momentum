@@ -27,17 +27,6 @@ export function createSeedTasks(): Task[] {
       updatedAt: now,
       archived: false,
     },
-    {
-      id: uuidv4(),
-      name: 'Wash face',
-      kind: 'habit',
-      schedule: { type: 'daily' },
-      targetPerDay: 1,
-      createdAt: now,
-      updatedAt: now,
-      archived: false,
-    },
-
     // Weekly chores - one per day (15-minute tasks)
     {
       id: uuidv4(),

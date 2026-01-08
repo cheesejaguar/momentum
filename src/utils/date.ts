@@ -147,3 +147,34 @@ export function getWeekdayShort(dayIndex: number): string {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   return days[dayIndex];
 }
+
+/**
+ * Get the next week's start date
+ */
+export function getNextWeekStart(weekStartDate: string): string {
+  const date = parseLocalDate(weekStartDate);
+  date.setDate(date.getDate() + 7);
+  return getLocalDateString(date);
+}
+
+/**
+ * Get the previous week's start date
+ */
+export function getPrevWeekStart(weekStartDate: string): string {
+  const date = parseLocalDate(weekStartDate);
+  date.setDate(date.getDate() - 7);
+  return getLocalDateString(date);
+}
+
+/**
+ * Format week range as "Jan 5 - Jan 11" style
+ */
+export function formatWeekRange(weekStartDate: string): string {
+  const startDate = parseLocalDate(weekStartDate);
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 6);
+
+  const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const endStr = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${startStr} - ${endStr}`;
+}

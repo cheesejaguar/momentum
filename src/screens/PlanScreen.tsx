@@ -4,7 +4,11 @@ import type { Task, TaskKind } from '../data/types';
 import { FullPageLoader, EmptyState } from '../components';
 import { Modal } from '../components/Modal';
 import { TaskForm } from '../components/TaskForm';
-import { getScheduleDescription } from '../utils/scheduling';
+import { ViewToggle, type ViewMode } from '../components/ViewToggle';
+import { WeeklyCalendar } from '../components/WeeklyCalendar';
+import { DayTasksList } from '../components/DayTasksList';
+import { getScheduleDescription, getScheduledTasksForDate } from '../utils/scheduling';
+import { getWeekStart, getLocalDateString } from '../utils/date';
 
 type FilterType = 'all' | TaskKind;
 
@@ -15,6 +19,11 @@ export function PlanScreen() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [currentWeekStart, setCurrentWeekStart] = useState(() =>
+    getWeekStart(getLocalDateString())
+  );
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const filteredTasks = useMemo(() => {
     if (filter === 'all') return tasks;
@@ -27,6 +36,20 @@ export function PlanScreen() {
     const custom = tasks.filter(t => t.kind === 'custom');
     return { habits, chores, custom };
   }, [tasks]);
+
+  const tasksForSelectedDate = useMemo(() => {
+    if (!selectedDate) return [];
+    return getScheduledTasksForDate(tasks, selectedDate);
+  }, [tasks, selectedDate]);
+
+  const handleSelectDate = (date: string) => {
+    setSelectedDate(date === selectedDate ? null : date);
+  };
+
+  const handleWeekChange = (weekStart: string) => {
+    setCurrentWeekStart(weekStart);
+    setSelectedDate(null);
+  };
 
   if (isLoading) {
     return <FullPageLoader />;
@@ -98,8 +121,15 @@ export function PlanScreen() {
           </button>
         </div>
 
-        {/* Filters */}
+        {/* View Toggle */}
         {tasks.length > 0 && (
+          <div className="mt-4">
+            <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+          </div>
+        )}
+
+        {/* Filters - only show in list view */}
+        {tasks.length > 0 && viewMode === 'list' && (
           <div className="flex gap-2 mt-4 overflow-x-auto pb-1 -mx-1 px-1">
             {filters.map(f => (
               <button
@@ -162,6 +192,26 @@ export function PlanScreen() {
               </button>
             }
           />
+        ) : viewMode === 'calendar' ? (
+          /* Calendar View */
+          <div className="space-y-4">
+            <WeeklyCalendar
+              tasks={tasks}
+              weekStartDate={currentWeekStart}
+              selectedDate={selectedDate}
+              onSelectDate={handleSelectDate}
+              onWeekChange={handleWeekChange}
+            />
+
+            {selectedDate && (
+              <DayTasksList
+                date={selectedDate}
+                tasks={tasksForSelectedDate}
+                onEditTask={handleEditTask}
+                onClose={() => setSelectedDate(null)}
+              />
+            )}
+          </div>
         ) : filteredTasks.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-slate-500 dark:text-slate-400">
@@ -169,6 +219,7 @@ export function PlanScreen() {
             </p>
           </div>
         ) : (
+          /* List View */
           <div className="space-y-3">
             {filteredTasks.map(task => (
               <div
