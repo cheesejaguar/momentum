@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { TEST_TIMEZONES, useTimezone } from '../test/timezone';
 import type { Task, CompletionLog } from '../data/types';
 import {
   isTaskScheduledForDate,
@@ -78,24 +79,54 @@ describe('isTaskScheduledForDate', () => {
     expect(isTaskScheduledForDate(task, '2025-01-15')).toBe(true);
   });
 
-  it('returns true for every_n_days on correct interval', () => {
-    const task = createTask({
-      schedule: { type: 'every_n_days', everyNDays: 3 },
-      createdAt: '2025-01-01T00:00:00.000Z',
-    });
-    expect(isTaskScheduledForDate(task, '2025-01-01')).toBe(true); // Day 0
-    expect(isTaskScheduledForDate(task, '2025-01-04')).toBe(true); // Day 3
-    expect(isTaskScheduledForDate(task, '2025-01-07')).toBe(true); // Day 6
-  });
+  for (const tz of TEST_TIMEZONES) {
+    describe(`every_n_days in ${tz}`, () => {
+      useTimezone(tz);
 
-  it('returns false for every_n_days on wrong interval', () => {
-    const task = createTask({
-      schedule: { type: 'every_n_days', everyNDays: 3 },
-      createdAt: '2025-01-01T00:00:00.000Z',
+      // A task created at 9am local time on Jan 1 (createdAt is stored as UTC ISO)
+      const createdJan1 = () => new Date(2025, 0, 1, 9, 0).toISOString();
+
+      it('returns true for every_n_days on correct interval', () => {
+        const task = createTask({
+          schedule: { type: 'every_n_days', everyNDays: 3 },
+          createdAt: createdJan1(),
+        });
+        expect(isTaskScheduledForDate(task, '2025-01-01')).toBe(true); // Day 0
+        expect(isTaskScheduledForDate(task, '2025-01-04')).toBe(true); // Day 3
+        expect(isTaskScheduledForDate(task, '2025-01-07')).toBe(true); // Day 6
+      });
+
+      it('returns false for every_n_days on wrong interval', () => {
+        const task = createTask({
+          schedule: { type: 'every_n_days', everyNDays: 3 },
+          createdAt: createdJan1(),
+        });
+        expect(isTaskScheduledForDate(task, '2025-01-02')).toBe(false); // Day 1
+        expect(isTaskScheduledForDate(task, '2025-01-03')).toBe(false); // Day 2
+      });
+
+      it('uses the local creation date, not the UTC date', () => {
+        // 11pm local on Jan 1 is already Jan 2 in UTC for negative offsets
+        const task = createTask({
+          schedule: { type: 'every_n_days', everyNDays: 2 },
+          createdAt: new Date(2025, 0, 1, 23, 0).toISOString(),
+        });
+        expect(isTaskScheduledForDate(task, '2025-01-01')).toBe(true);
+        expect(isTaskScheduledForDate(task, '2025-01-02')).toBe(false);
+        expect(isTaskScheduledForDate(task, '2025-01-03')).toBe(true);
+      });
+
+      it('stays on interval after a DST change', () => {
+        const task = createTask({
+          schedule: { type: 'every_n_days', everyNDays: 2 },
+          createdAt: new Date(2025, 2, 8, 9, 0).toISOString(), // Mar 8, day before US DST
+        });
+        expect(isTaskScheduledForDate(task, '2025-03-09')).toBe(false); // Day 1
+        expect(isTaskScheduledForDate(task, '2025-03-10')).toBe(true); // Day 2
+        expect(isTaskScheduledForDate(task, '2025-03-12')).toBe(true); // Day 4
+      });
     });
-    expect(isTaskScheduledForDate(task, '2025-01-02')).toBe(false); // Day 1
-    expect(isTaskScheduledForDate(task, '2025-01-03')).toBe(false); // Day 2
-  });
+  }
 });
 
 describe('getScheduledTasksForDate', () => {
@@ -188,16 +219,17 @@ describe('groupTasksByKind', () => {
       createTask({ id: '4', kind: 'habit' }),
     ];
     const result = groupTasksByKind(tasks);
-    expect(result.habits).toHaveLength(2);
-    expect(result.chores).toHaveLength(1);
-    expect(result.custom).toHaveLength(1);
+    expect(result.habits.map(t => t.id)).toEqual(['1', '4']);
+    expect(result.chores.map(t => t.id)).toEqual(['2']);
+    expect(result.custom.map(t => t.id)).toEqual(['3']);
   });
 
   it('returns empty arrays when no tasks of a kind', () => {
     const tasks = [createTask({ kind: 'habit' })];
     const result = groupTasksByKind(tasks);
-    expect(result.chores).toHaveLength(0);
-    expect(result.custom).toHaveLength(0);
+    expect(result.habits).toHaveLength(1);
+    expect(result.chores).toEqual([]);
+    expect(result.custom).toEqual([]);
   });
 });
 

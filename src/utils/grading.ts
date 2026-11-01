@@ -1,6 +1,6 @@
 import type { Grade, Task, CompletionLog, DayStats, WeekStats, StreakState } from '../data/types';
 import { getScheduledTasksForDate, isTaskCompleteForDate } from './scheduling';
-import { getWeekDates, getLastNDays, getLastNWeekStarts, getWeekStart } from './date';
+import { getWeekDates, getLastNDays, getLastNWeekStarts, getWeekStart, getLocalDateString, parseLocalDate } from './date';
 
 /**
  * Calculate grade from completion percentage
@@ -306,10 +306,11 @@ export function getLastNWeeksStats(
  * Check if date2 is the day after date1
  */
 function isNextDay(date1: string, date2: string): boolean {
-  const d1 = new Date(date1 + 'T00:00:00');
-  const d2 = new Date(date2 + 'T00:00:00');
+  const d1 = parseLocalDate(date1);
+  const d2 = parseLocalDate(date2);
   const diffMs = d2.getTime() - d1.getTime();
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  // Round: a day that crosses a DST change is 23h or 25h long
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
   return diffDays === 1;
 }
 
@@ -329,7 +330,7 @@ export function calculateConsistencyStreak(
   for (let i = 0; i < 365; i++) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
 
     const stats = getDayStats(tasks, completions, dateString);
 
@@ -367,7 +368,7 @@ export function calculatePerfectStreak(
   for (let i = 0; i < 365; i++) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
 
     const stats = getDayStats(tasks, completions, dateString);
 
@@ -516,7 +517,7 @@ export function calculateCurrentStreak(
   for (let i = 0; i < 365; i++) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
 
     const stats = getDayStats(tasks, completions, dateString);
 
