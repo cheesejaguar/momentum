@@ -95,7 +95,8 @@ export function daysBetween(dateString1: string, dateString2: string): number {
   const date1 = parseLocalDate(dateString1);
   const date2 = parseLocalDate(dateString2);
   const diffTime = Math.abs(date2.getTime() - date1.getTime());
-  return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  // Round rather than floor: a span crossing a DST change is 23h or 25h per day
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
 }
 
 /**

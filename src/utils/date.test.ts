@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { TEST_TIMEZONES, useTimezone } from '../test/timezone';
 import {
   getLocalDateString,
   parseLocalDate,
@@ -29,8 +30,13 @@ describe('getLocalDateString', () => {
   });
 
   it('uses current date when no argument provided', () => {
-    const result = getLocalDateString();
-    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2025, 6, 4, 23, 30)); // Jul 4, 2025 23:30 local
+    try {
+      expect(getLocalDateString()).toBe('2025-07-04');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -174,6 +180,23 @@ describe('daysBetween', () => {
   it('returns absolute difference regardless of order', () => {
     expect(daysBetween('2025-01-22', '2025-01-15')).toBe(7);
   });
+
+  for (const tz of TEST_TIMEZONES) {
+    describe(`across DST transitions in ${tz}`, () => {
+      useTimezone(tz);
+
+      it('counts calendar days when clocks spring forward', () => {
+        // US DST starts 2025-03-09: the span is only 47 hours in America/Los_Angeles
+        expect(daysBetween('2025-03-08', '2025-03-10')).toBe(2);
+        expect(daysBetween('2025-03-01', '2025-03-15')).toBe(14);
+      });
+
+      it('counts calendar days when clocks fall back', () => {
+        // US DST ends 2025-11-02: the span is 49 hours in America/Los_Angeles
+        expect(daysBetween('2025-11-01', '2025-11-03')).toBe(2);
+      });
+    });
+  }
 });
 
 describe('formatDateForDisplay', () => {
@@ -203,15 +226,21 @@ describe('isSameDay', () => {
 });
 
 describe('isToday', () => {
-  it('returns true for today', () => {
-    const today = getLocalDateString();
-    expect(isToday(today)).toBe(true);
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('returns false for yesterday', () => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    expect(isToday(getLocalDateString(yesterday))).toBe(false);
+  it('returns true for today', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2025, 0, 15, 22, 0));
+    expect(isToday('2025-01-15')).toBe(true);
+  });
+
+  it('returns false for yesterday and tomorrow', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2025, 0, 15, 22, 0));
+    expect(isToday('2025-01-14')).toBe(false);
+    expect(isToday('2025-01-16')).toBe(false);
   });
 });
 

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { Task, CompletionLog } from '../data/types';
+import type { Task, CompletionLog, StreakState } from '../data/types';
+import { DEFAULT_STREAK_STATE } from '../data/types';
+import { TEST_TIMEZONES, useTimezone } from '../test/timezone';
 import {
   gradeForPercent,
   getGradeColor,
@@ -17,6 +19,8 @@ import {
   calculateConsistencyStreak,
   calculatePerfectStreak,
   getNextBestAction,
+  updateStreakState,
+  applyGraceDay,
 } from './grading';
 
 // Helper to create test data
@@ -362,6 +366,9 @@ describe('calculateConsistencyStreak', () => {
     const completions = [
       createCompletion({ taskId: '1', date: '2025-01-15' }), // Focus task done
       createCompletion({ taskId: '1', date: '2025-01-14' }), // Focus task done
+      // Only the non-focus task done: not consistent when focus tasks exist
+      createCompletion({ taskId: '2', date: '2025-01-13' }),
+      createCompletion({ taskId: '1', date: '2025-01-12' }),
     ];
     const result = calculateConsistencyStreak(tasks, completions, today);
     expect(result).toBe(2);
@@ -543,5 +550,159 @@ describe('getWeekStats extended fields', () => {
     const result = getWeekStats(tasks, completions, '2025-01-12');
 
     expect(result.perfectDays).toBe(2); // 2 days with 100%
+  });
+});
+
+describe.each(TEST_TIMEZONES)('streaks use local dates in %s', (tz) => {
+  useTimezone(tz);
+
+  // Late evening local time: already the next day in UTC for negative offsets
+  const eveningJan15 = () => new Date(2025, 0, 15, 21, 30);
+  // Just after local midnight: still the previous day in UTC for positive offsets
+  const earlyJan15 = () => new Date(2025, 0, 15, 0, 30);
+
+  const tasks = [createTask({ id: '1' })];
+  const completions = [
+    createCompletion({ taskId: '1', date: '2025-01-15' }),
+    createCompletion({ taskId: '1', date: '2025-01-14' }),
+    createCompletion({ taskId: '1', date: '2025-01-13' }),
+  ];
+
+  it('calculateCurrentStreak counts from the local day', () => {
+    expect(calculateCurrentStreak(tasks, completions, eveningJan15())).toBe(3);
+    expect(calculateCurrentStreak(tasks, completions, earlyJan15())).toBe(3);
+  });
+
+  it('calculateConsistencyStreak counts from the local day', () => {
+    expect(calculateConsistencyStreak(tasks, completions, eveningJan15())).toBe(3);
+    expect(calculateConsistencyStreak(tasks, completions, earlyJan15())).toBe(3);
+  });
+
+  it('calculatePerfectStreak counts from the local day', () => {
+    expect(calculatePerfectStreak(tasks, completions, eveningJan15())).toBe(3);
+    expect(calculatePerfectStreak(tasks, completions, earlyJan15())).toBe(3);
+  });
+
+  it('calculateLongestStreak treats a DST change as consecutive days', () => {
+    const dstCompletions = [
+      createCompletion({ taskId: '1', date: '2025-03-08' }),
+      createCompletion({ taskId: '1', date: '2025-03-09' }), // US DST starts
+      createCompletion({ taskId: '1', date: '2025-03-10' }),
+    ];
+    expect(calculateLongestStreak(tasks, dstCompletions)).toBe(3);
+  });
+
+  it('updateStreakState continues a streak across a DST change', () => {
+    const current: StreakState = {
+      ...DEFAULT_STREAK_STATE,
+      consistencyStreak: 4,
+      lastConsistencyDate: '2025-03-09',
+      perfectStreak: 4,
+      lastPerfectDate: '2025-03-09',
+      graceDayWeekStart: '2025-03-09',
+    };
+    const result = updateStreakState(
+      current,
+      tasks,
+      [createCompletion({ taskId: '1', date: '2025-03-10' })],
+      '2025-03-10'
+    );
+    expect(result.showGraceDayPrompt).toBe(false);
+    expect(result.streaks.consistencyStreak).toBe(5);
+    expect(result.streaks.perfectStreak).toBe(5);
+  });
+});
+
+describe('updateStreakState', () => {
+  const tasks = [createTask({ id: '1' }), createTask({ id: '2' })];
+  const base: StreakState = {
+    ...DEFAULT_STREAK_STATE,
+    consistencyStreak: 3,
+    lastConsistencyDate: '2025-01-14',
+    perfectStreak: 2,
+    lastPerfectDate: '2025-01-14',
+    graceDaysUsedThisWeek: 0,
+    graceDayWeekStart: '2025-01-12',
+    bestConsistencyStreak: 3,
+    bestPerfectStreak: 5,
+  };
+
+  it('extends both streaks on a perfect next day', () => {
+    const completions = [
+      createCompletion({ taskId: '1', date: '2025-01-15' }),
+      createCompletion({ taskId: '2', date: '2025-01-15' }),
+    ];
+    const result = updateStreakState(base, tasks, completions, '2025-01-15');
+
+    expect(result.streaks.consistencyStreak).toBe(4);
+    expect(result.streaks.lastConsistencyDate).toBe('2025-01-15');
+    expect(result.streaks.perfectStreak).toBe(3);
+    expect(result.streaks.lastPerfectDate).toBe('2025-01-15');
+    expect(result.streaks.bestConsistencyStreak).toBe(4);
+    expect(result.streaks.bestPerfectStreak).toBe(5);
+    expect(result.showGraceDayPrompt).toBe(false);
+    expect(result.streakType).toBeNull();
+  });
+
+  it('does not double count when called twice on the same day', () => {
+    const completions = [createCompletion({ taskId: '1', date: '2025-01-15' })];
+    const once = updateStreakState(base, tasks, completions, '2025-01-15');
+    const twice = updateStreakState(once.streaks, tasks, completions, '2025-01-15');
+
+    expect(twice.streaks.consistencyStreak).toBe(4);
+  });
+
+  it('offers a grace day when a consistency streak has a gap', () => {
+    const completions = [createCompletion({ taskId: '1', date: '2025-01-16' })];
+    const result = updateStreakState(base, tasks, completions, '2025-01-16');
+
+    expect(result.showGraceDayPrompt).toBe(true);
+    expect(result.streakType).toBe('consistency');
+    expect(result.streaks.consistencyStreak).toBe(3);
+  });
+
+  it('resets the consistency streak on a gap once the grace day is used', () => {
+    const completions = [createCompletion({ taskId: '1', date: '2025-01-16' })];
+    const result = updateStreakState(
+      { ...base, graceDaysUsedThisWeek: 1 },
+      tasks,
+      completions,
+      '2025-01-16'
+    );
+
+    expect(result.showGraceDayPrompt).toBe(false);
+    expect(result.streaks.consistencyStreak).toBe(1);
+  });
+
+  it('resets grace day usage in a new week', () => {
+    const completions = [createCompletion({ taskId: '1', date: '2025-01-19' })];
+    const result = updateStreakState(
+      { ...base, graceDaysUsedThisWeek: 1, lastConsistencyDate: '2025-01-18' },
+      tasks,
+      completions,
+      '2025-01-19'
+    );
+
+    expect(result.streaks.graceDayWeekStart).toBe('2025-01-19');
+    expect(result.streaks.graceDaysUsedThisWeek).toBe(0);
+  });
+});
+
+describe('applyGraceDay', () => {
+  it('records grace day use and moves only the chosen streak forward', () => {
+    const current: StreakState = {
+      ...DEFAULT_STREAK_STATE,
+      consistencyStreak: 3,
+      lastConsistencyDate: '2025-01-13',
+      perfectStreak: 2,
+      lastPerfectDate: '2025-01-13',
+      graceDayWeekStart: '2025-01-12',
+    };
+    const result = applyGraceDay(current, 'consistency', '2025-01-15');
+
+    expect(result.graceDaysUsedThisWeek).toBe(1);
+    expect(result.lastConsistencyDate).toBe('2025-01-15');
+    expect(result.lastPerfectDate).toBe('2025-01-13');
+    expect(result.consistencyStreak).toBe(3);
   });
 });
